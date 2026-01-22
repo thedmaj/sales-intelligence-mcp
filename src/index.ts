@@ -97,7 +97,7 @@ app.get('/', (req, res) => {
       tools: '/tools',
       execute: '/tools/:toolName'
     },
-    documentation: 'https://github.com/your-username/sales-intelligence-mcp#readme'
+    documentation: 'https://github.com/thedmaj/sales-intelligence-mcp#readme'
   });
 });
 
@@ -117,7 +117,7 @@ app.listen(PORT, () => {
   logger.info(`🚀 Sales Intelligence MCP Server running on port ${PORT}`);
   logger.info(`📊 Health check: http://localhost:${PORT}/health`);
   logger.info(`🛠️  Available tools: http://localhost:${PORT}/tools`);
-  logger.info(`📖 Documentation: https://github.com/your-username/sales-intelligence-mcp#readme`);
+  logger.info(`📖 Documentation: https://github.com/thedmaj/sales-intelligence-mcp#readme`);
 
   // Log configuration
   logger.info('Configuration:', {

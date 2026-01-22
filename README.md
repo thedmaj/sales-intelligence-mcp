@@ -8,7 +8,7 @@ An MCP (Model Context Protocol) server that provides AI assistants like Cursor a
 
 ```bash
 # Run directly with npx (no installation needed)
-npx @your-org/sales-intelligence-mcp
+npx @thedmaj/sales-intelligence-mcp
 
 # Server will start on http://localhost:3001
 ```
@@ -133,7 +133,7 @@ Find available playbooks and identify content gaps.
 
 ### Option 1: NPX (Recommended)
 ```bash
-npx @your-org/sales-intelligence-mcp
+npx @thedmaj/sales-intelligence-mcp
 ```
 
 ### Option 2: Global Installation
@@ -144,7 +144,7 @@ sales-intelligence-mcp
 
 ### Option 3: Local Development
 ```bash
-git clone https://github.com/your-username/sales-intelligence-mcp.git
+git clone https://github.com/thedmaj/sales-intelligence-mcp.git
 cd sales-intelligence-mcp
 npm install
 npm run build
@@ -159,13 +159,13 @@ npm start
 ```bash
 # Solution: Verify your API key
 export API_KEY=your_actual_api_key_here
-npx @your-org/sales-intelligence-mcp
+npx @thedmaj/sales-intelligence-mcp
 ```
 
 **❌ "Connection refused" in Cursor**
 ```bash
 # Solution: Ensure server is running
-npx @your-org/sales-intelligence-mcp
+npx @thedmaj/sales-intelligence-mcp
 # Then check http://localhost:3001/health
 ```
 
@@ -194,7 +194,7 @@ Expected response:
 
 Enable detailed logging:
 ```bash
-MCP_LOG_LEVEL=debug npx @your-org/sales-intelligence-mcp
+MCP_LOG_LEVEL=debug npx @thedmaj/sales-intelligence-mcp
 ```
 
 ## 📖 Cursor Integration Examples
@@ -312,7 +312,7 @@ Found 3 plays matching your query for Account Verification in Enterprise segment
 
 Found a bug or want to contribute?
 
-1. **Issues**: Report bugs at [GitHub Issues](https://github.com/your-username/sales-intelligence-mcp/issues)
+1. **Issues**: Report bugs at [GitHub Issues](https://github.com/thedmaj/sales-intelligence-mcp/issues)
 2. **Feature Requests**: Suggest improvements via issues
 3. **Pull Requests**: Contributions welcome!
 
@@ -322,11 +322,11 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 ## 🔗 Links
 
-- **GitHub Repository**: https://github.com/your-username/sales-intelligence-mcp
+- **GitHub Repository**: https://github.com/thedmaj/sales-intelligence-mcp
 - **NPM Package**: https://www.npmjs.com/package/@your-org/sales-intelligence-mcp
-- **Issues & Support**: https://github.com/your-username/sales-intelligence-mcp/issues
+- **Issues & Support**: https://github.com/thedmaj/sales-intelligence-mcp/issues
 - **MCP Protocol**: https://modelcontextprotocol.io/
 
 ---
 
-**Ready to get started?** Run `npx @your-org/sales-intelligence-mcp` and configure Cursor to unlock AI-powered sales intelligence! 🚀
+**Ready to get started?** Run `npx @thedmaj/sales-intelligence-mcp` and configure Cursor to unlock AI-powered sales intelligence! 🚀
