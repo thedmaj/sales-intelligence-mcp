@@ -53,18 +53,31 @@ async function handler(args: any, apiClient: any): Promise<string> {
     // Validate input
     const input = querySchema.parse(args);
 
-    // Search demo data
-    const results = searchPlays(input.query, {
-      solution: input.solution,
-      segment: input.segment,
-      playType: input.playType
-    }).slice(0, input.limit);
+    // Use real API if available, otherwise fall back to demo data
+    if (apiClient) {
+      try {
+        const apiResponse = await apiClient.request('/api/mcp/find_sales_content', input);
 
-    if (results.length === 0) {
-      return formatNoResultsResponse(input.query, input);
+        // Parse the API response which should contain content array
+        if (apiResponse.content && apiResponse.content.length > 0) {
+          const responseText = apiResponse.content[0].text;
+          // If response is JSON string, parse it, otherwise return as is
+          try {
+            const parsed = JSON.parse(responseText);
+            return formatApiResponse(parsed, input);
+          } catch {
+            return responseText; // Already formatted response
+          }
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return `# API Connection Error\n\nFailed to connect to sales intelligence API: ${message}\n\nFalling back to demo data...\n\n` +
+               formatDemoResponse(input);
+      }
     }
 
-    return formatSuccessResponse(results, input);
+    // Fallback to demo data
+    return formatDemoResponse(input);
 
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -72,6 +85,49 @@ async function handler(args: any, apiClient: any): Promise<string> {
     }
     throw error;
   }
+}
+
+function formatDemoResponse(input: any): string {
+  // Search demo data
+  const results = searchPlays(input.query, {
+    solution: input.solution,
+    segment: input.segment,
+    playType: input.playType
+  }).slice(0, input.limit);
+
+  if (results.length === 0) {
+    return formatNoResultsResponse(input.query, input);
+  }
+
+  return formatSuccessResponse(results, input);
+}
+
+function formatApiResponse(data: any, input: any): string {
+  if (data.success && data.data) {
+    // Format API response similar to demo format
+    const results = data.data.results || {};
+
+    let response = `# Sales Content Search Results\n\n## Summary\n${data.data.answer}\n\n`;
+
+    if (results.plays && results.plays.length > 0) {
+      response += `## Results\n\n`;
+      results.plays.forEach((play: any, index: number) => {
+        response += `### ${index + 1}. ${play.name}\n`;
+        response += `- **Type**: ${formatPlayType(play.genericPlayType)}\n`;
+        response += `- **Playbook**: ${play.playbook?.name || 'Unknown'}\n`;
+        response += `- **Solution**: ${play.solution?.name || 'Unknown'}\n`;
+        if (play.segment) {
+          response += `- **Segment**: ${play.segment.name}\n`;
+        }
+        response += `- **Description**: ${play.description}\n`;
+        response += `- **Use When**: ${getUseWhenAdvice(play.genericPlayType)}\n\n`;
+      });
+    }
+
+    return response;
+  }
+
+  return `# API Response Error\n\nReceived unexpected response format from API.\n\nFalling back to demo data...`;
 }
 
 function formatSuccessResponse(results: any[], input: any): string {

@@ -3,6 +3,7 @@
 import * as readline from 'readline';
 import { tools } from './tools/index.js';
 import { logger } from './utils/logger.js';
+import { ApiClient } from './auth/apiClient.js';
 
 interface MCPMessage {
   jsonrpc: '2.0';
@@ -23,6 +24,7 @@ interface MCPResponse {
 
 class SalesIntelligenceMCPServer {
   private rl: readline.Interface;
+  private apiClient: ApiClient | null = null;
 
   constructor() {
     this.rl = readline.createInterface({
@@ -126,7 +128,7 @@ class SalesIntelligenceMCPServer {
 
     try {
       logger.info(`Executing tool: ${name}`, { args });
-      const result = await tool.handler(args, null);
+      const result = await tool.handler(args, this.apiClient);
 
       const response: MCPResponse = {
         jsonrpc: '2.0',
@@ -167,11 +169,31 @@ class SalesIntelligenceMCPServer {
   }
 
   run() {
+    // Initialize API client if environment variables are provided
+    const apiBaseUrl = process.env.API_BASE_URL;
+    const apiKey = process.env.API_KEY;
+
+    if (apiBaseUrl && apiKey) {
+      this.apiClient = new ApiClient({
+        baseUrl: apiBaseUrl,
+        apiKey: apiKey,
+        timeout: parseInt(process.env.MCP_TIMEOUT || '10000')
+      });
+      logger.info('API client configured for real data', { baseUrl: apiBaseUrl });
+    } else {
+      logger.info('No API configuration found, using demo data');
+    }
+
     logger.info('Sales Intelligence MCP Server starting on stdio transport');
     logger.info(`Available tools: ${Object.keys(tools).join(', ')}`);
 
     // Send server ready notification to stderr so it doesn't interfere with JSON-RPC
     process.stderr.write(`Sales Intelligence MCP Server ready with ${Object.keys(tools).length} tools\n`);
+    if (this.apiClient) {
+      process.stderr.write(`Connected to API: ${apiBaseUrl}\n`);
+    } else {
+      process.stderr.write(`Running in demo mode\n`);
+    }
   }
 }
 
