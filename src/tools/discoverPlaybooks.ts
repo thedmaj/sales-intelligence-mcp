@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { searchPlaybooks, demoPlaybooks } from '../data/demoData.js';
+import { logger } from '../utils/logger.js';
 import type { MCPTool } from './index.js';
 
 const inputSchema = {
@@ -46,18 +47,39 @@ async function handler(args: any, apiClient: any): Promise<string> {
       return formatMissingFiltersError();
     }
 
-    const playbooks = searchPlaybooks({
-      solution: input.solution,
-      segment: input.segment,
-      vertical: input.vertical,
-      industry: input.industry
-    });
+    // Use real API if available, otherwise fall back to demo data
+    if (apiClient) {
+      try {
+        const apiResponse = await apiClient.request('/discover_playbooks', input);
 
-    if (playbooks.length === 0) {
-      return formatNoPlaybooksFound(input);
+        if (apiResponse.content && apiResponse.content.length > 0) {
+          const responseText = apiResponse.content[0].text;
+          try {
+            const parsed = JSON.parse(responseText);
+            return formatApiPlaybookResponse(parsed, input);
+          } catch {
+            return responseText; // Already formatted response
+          }
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const statusCode = (error as any).status || 'Unknown';
+        const url = `${apiClient.config?.baseUrl || 'unknown'}/discover_playbooks`;
+
+        logger.error(`API request failed for discover_playbooks:`, {
+          error: message,
+          url,
+          status: statusCode,
+          input
+        });
+
+        return `# API Connection Error\n\nFailed to connect to sales intelligence API:\n- **URL**: ${url}\n- **Error**: ${message}\n- **Status**: ${statusCode}\n\nFalling back to demo data...\n\n` +
+               formatDemoPlaybookResponse(input);
+      }
     }
 
-    return formatPlaybookResults(playbooks, input);
+    // Fallback to demo data
+    return formatDemoPlaybookResponse(input);
 
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -65,6 +87,28 @@ async function handler(args: any, apiClient: any): Promise<string> {
     }
     throw error;
   }
+}
+
+function formatDemoPlaybookResponse(input: any): string {
+  const playbooks = searchPlaybooks({
+    solution: input.solution,
+    segment: input.segment,
+    vertical: input.vertical,
+    industry: input.industry
+  });
+
+  if (playbooks.length === 0) {
+    return formatNoPlaybooksFound(input);
+  }
+
+  return formatPlaybookResults(playbooks, input);
+}
+
+function formatApiPlaybookResponse(data: any, input: any): string {
+  if (data.playbooks) {
+    return formatPlaybookResults(data.playbooks, input);
+  }
+  return `# API Response Error\n\nReceived unexpected response format from API.\n\nFalling back to demo data...`;
 }
 
 function formatPlaybookResults(playbooks: any[], input: any): string {

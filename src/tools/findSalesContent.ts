@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { distance } from 'fastest-levenshtein';
 import { searchPlays, demoPlays } from '../data/demoData.js';
+import { logger } from '../utils/logger.js';
 import type { MCPTool } from './index.js';
 
 const inputSchema = {
@@ -56,7 +57,7 @@ async function handler(args: any, apiClient: any): Promise<string> {
     // Use real API if available, otherwise fall back to demo data
     if (apiClient) {
       try {
-        const apiResponse = await apiClient.request('/api/mcp/find_sales_content', input);
+        const apiResponse = await apiClient.request('/find_sales_content', input);
 
         // Parse the API response which should contain content array
         if (apiResponse.content && apiResponse.content.length > 0) {
@@ -71,7 +72,17 @@ async function handler(args: any, apiClient: any): Promise<string> {
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        return `# API Connection Error\n\nFailed to connect to sales intelligence API: ${message}\n\nFalling back to demo data...\n\n` +
+        const statusCode = (error as any).status || 'Unknown';
+        const url = `${apiClient.config?.baseUrl || 'unknown'}/find_sales_content`;
+
+        logger.error(`API request failed for find_sales_content:`, {
+          error: message,
+          url,
+          status: statusCode,
+          input
+        });
+
+        return `# API Connection Error\n\nFailed to connect to sales intelligence API:\n- **URL**: ${url}\n- **Error**: ${message}\n- **Status**: ${statusCode}\n\nFalling back to demo data...\n\n` +
                formatDemoResponse(input);
       }
     }

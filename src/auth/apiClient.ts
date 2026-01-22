@@ -21,7 +21,9 @@ export class ApiClient {
       const response = await fetch(url, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${this.config.apiKey}`,
+          'Authorization': this.config.apiKey.startsWith('Bearer ') || this.config.apiKey.startsWith('MCP-Key ')
+            ? this.config.apiKey
+            : `Bearer ${this.config.apiKey}`,
           'Content-Type': 'application/json',
           'User-Agent': 'sales-intelligence-mcp/1.0.0',
           'Accept': 'application/json'

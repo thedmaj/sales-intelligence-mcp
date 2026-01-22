@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { distance } from 'fastest-levenshtein';
 import { findCompetitor, demoCompetitors } from '../data/demoData.js';
+import { logger } from '../utils/logger.js';
 import type { MCPTool } from './index.js';
 
 const inputSchema = {
@@ -34,21 +35,63 @@ async function handler(args: any, apiClient: any): Promise<string> {
     // Validate input
     const input = competitorSchema.parse(args);
 
-    // Find competitor in demo data
-    const competitorData = findCompetitor(input.competitor);
+    // Use real API if available, otherwise fall back to demo data
+    if (apiClient) {
+      try {
+        const apiResponse = await apiClient.request('/get_competitive_intel', input);
 
-    if (!competitorData) {
-      return formatCompetitorNotFound(input.competitor);
+        if (apiResponse.content && apiResponse.content.length > 0) {
+          const responseText = apiResponse.content[0].text;
+          try {
+            const parsed = JSON.parse(responseText);
+            return formatApiCompetitiveResponse(parsed, input);
+          } catch {
+            return responseText; // Already formatted response
+          }
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const statusCode = (error as any).status || 'Unknown';
+        const url = `${apiClient.config?.baseUrl || 'unknown'}/get_competitive_intel`;
+
+        logger.error(`API request failed for get_competitive_intel:`, {
+          error: message,
+          url,
+          status: statusCode,
+          input
+        });
+
+        return `# API Connection Error\n\nFailed to connect to sales intelligence API:\n- **URL**: ${url}\n- **Error**: ${message}\n- **Status**: ${statusCode}\n\nFalling back to demo data...\n\n` +
+               formatDemoCompetitiveResponse(input);
+      }
     }
 
-    return formatCompetitiveIntelligence(competitorData, input);
-
+    // Fallback to demo data
+    return formatDemoCompetitiveResponse(input);
   } catch (error) {
     if (error instanceof z.ZodError) {
       return formatValidationError(error);
     }
     throw new Error(`Competitive intelligence query failed: ${error instanceof Error ? error.message : String(error)}`);
   }
+}
+
+function formatDemoCompetitiveResponse(input: any): string {
+  // Find competitor in demo data
+  const competitorData = findCompetitor(input.competitor);
+
+  if (!competitorData) {
+    return formatCompetitorNotFound(input.competitor);
+  }
+
+  return formatCompetitiveIntelligence(competitorData, input);
+}
+
+function formatApiCompetitiveResponse(data: any, input: any): string {
+  if (data.competitor) {
+    return formatCompetitiveIntelligence(data, input);
+  }
+  return `# API Response Error\n\nReceived unexpected response format from API.\n\nFalling back to demo data...`;
 }
 
 function formatCompetitiveIntelligence(competitor: any, input: any): string {

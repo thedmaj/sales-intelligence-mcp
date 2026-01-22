@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { searchWorkflows } from '../data/demoData.js';
+import { logger } from '../utils/logger.js';
 import type { MCPTool } from './index.js';
 
 const inputSchema = {
@@ -33,15 +34,39 @@ async function handler(args: any, apiClient: any): Promise<string> {
   try {
     const input = workflowSchema.parse(args);
 
-    const workflows = searchWorkflows(input.processType, {
-      solution: input.solution
-    });
+    // Use real API if available, otherwise fall back to demo data
+    if (apiClient) {
+      try {
+        const apiResponse = await apiClient.request('/find_process_workflows', input);
 
-    if (workflows.length === 0) {
-      return formatNoWorkflowsFound(input.processType, input.solution);
+        if (apiResponse.content && apiResponse.content.length > 0) {
+          const responseText = apiResponse.content[0].text;
+          try {
+            const parsed = JSON.parse(responseText);
+            return formatApiWorkflowResponse(parsed, input);
+          } catch {
+            return responseText; // Already formatted response
+          }
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const statusCode = (error as any).status || 'Unknown';
+        const url = `${apiClient.config?.baseUrl || 'unknown'}/find_process_workflows`;
+
+        logger.error(`API request failed for find_process_workflows:`, {
+          error: message,
+          url,
+          status: statusCode,
+          input
+        });
+
+        return `# API Connection Error\n\nFailed to connect to sales intelligence API:\n- **URL**: ${url}\n- **Error**: ${message}\n- **Status**: ${statusCode}\n\nFalling back to demo data...\n\n` +
+               formatDemoWorkflowResponse(input);
+      }
     }
 
-    return formatWorkflowResults(workflows, input);
+    // Fallback to demo data
+    return formatDemoWorkflowResponse(input);
 
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -49,6 +74,25 @@ async function handler(args: any, apiClient: any): Promise<string> {
     }
     throw error;
   }
+}
+
+function formatDemoWorkflowResponse(input: any): string {
+  const workflows = searchWorkflows(input.processType, {
+    solution: input.solution
+  });
+
+  if (workflows.length === 0) {
+    return formatNoWorkflowsFound(input.processType, input.solution);
+  }
+
+  return formatWorkflowResults(workflows, input);
+}
+
+function formatApiWorkflowResponse(data: any, input: any): string {
+  if (data.processType && data.workflows) {
+    return formatWorkflowResults(data.workflows, input);
+  }
+  return `# API Response Error\n\nReceived unexpected response format from API.\n\nFalling back to demo data...`;
 }
 
 function formatWorkflowResults(workflows: any[], input: any): string {
