@@ -1,133 +1,142 @@
 #!/usr/bin/env node
 
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import {
-  CallToolRequestSchema,
-  ListToolsRequestSchema,
-} from '@modelcontextprotocol/sdk/types.js';
-import { tools } from './tools/index.js';
-import { ApiClient } from './auth/apiClient.js';
+import express from 'express';
+import cors from 'cors';
 import { logger } from './utils/logger.js';
+import { tools } from './tools/index.js';
+import type { MCPTool } from './tools/index.js';
 
-// Environment validation
-const requiredEnvVars = ['API_BASE_URL', 'API_KEY'];
-const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
+const app = express();
+const PORT = process.env.MCP_PORT || 3001;
 
-if (missingVars.length > 0) {
-  console.error(`❌ Missing required environment variables: ${missingVars.join(', ')}`);
-  console.error('\n📖 Setup guide: https://github.com/yourorg/sales-intelligence-mcp#setup');
-  process.exit(1);
-}
+// Middleware
+app.use(cors());
+app.use(express.json({ limit: '10mb' }));
 
-// Configuration
-const config = {
-  baseUrl: process.env.API_BASE_URL!,
-  apiKey: process.env.API_KEY!,
-  timeout: parseInt(process.env.MCP_TIMEOUT || '30000'),
-  maxResults: parseInt(process.env.MCP_MAX_RESULTS || '20'),
-  cacheEnabled: process.env.MCP_CACHE_ENABLED !== 'false',
-  logLevel: process.env.MCP_LOG_LEVEL || 'error'
-};
+// Request logging middleware
+app.use((req, res, next) => {
+  const start = Date.now();
+  logger.info(`${req.method} ${req.path} - ${req.ip}`);
 
-const server = new Server(
-  {
-    name: 'sales-intelligence-mcp',
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    logger.info(`${req.method} ${req.path} - ${res.statusCode} (${duration}ms)`);
+  });
+
+  next();
+});
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  const uptime = process.uptime();
+  const uptimeFormatted = `${Math.floor(uptime / 60)}m ${Math.floor(uptime % 60)}s`;
+
+  res.json({
+    status: 'healthy',
     version: '1.0.0',
-  },
-  {
-    capabilities: {
-      tools: {},
-    },
-  }
-);
+    uptime: uptimeFormatted,
+    timestamp: new Date().toISOString(),
+    tools: Object.keys(tools).length
+  });
+});
 
-// Initialize API client
-const apiClient = new ApiClient(config);
+// MCP tool endpoints
+app.post('/tools/:toolName', async (req, res) => {
+  const { toolName } = req.params;
+  const tool = tools[toolName] as MCPTool;
+
+  if (!tool) {
+    return res.status(404).json({
+      error: `Tool '${toolName}' not found`,
+      availableTools: Object.keys(tools)
+    });
+  }
+
+  try {
+    const result = await tool.handler(req.body, null); // No API client needed for direct mode
+
+    res.json({
+      tool: toolName,
+      result: result,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.error(`Tool ${toolName} error:`, message);
+
+    res.status(400).json({
+      error: `Tool execution failed: ${message}`,
+      tool: toolName,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
 
 // List available tools
-server.setRequestHandler(ListToolsRequestSchema, async () => {
-  try {
-    logger.debug('Listing available MCP tools', { toolCount: Object.keys(tools).length });
+app.get('/tools', (req, res) => {
+  const toolList = Object.entries(tools).map(([name, tool]) => ({
+    name,
+    description: tool.description,
+    inputSchema: tool.inputSchema
+  }));
 
-    return {
-      tools: Object.values(tools).map(tool => ({
-        name: tool.name,
-        description: tool.description,
-        inputSchema: tool.inputSchema,
-      })),
-    };
-  } catch (error) {
-    logger.error('Error listing tools', { error });
-    throw error;
-  }
+  res.json({
+    tools: toolList,
+    count: toolList.length
+  });
 });
 
-// Handle tool calls
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  const { name, arguments: args } = request.params;
-  const startTime = Date.now();
-
-  try {
-    logger.debug('Executing tool', { toolName: name, args });
-
-    const tool = tools[name];
-    if (!tool) {
-      logger.error('Unknown tool requested', { toolName: name });
-      throw new Error(`Unknown tool: ${name}`);
-    }
-
-    const result = await tool.handler(args, apiClient);
-    const duration = Date.now() - startTime;
-
-    logger.debug('Tool execution completed', {
-      toolName: name,
-      duration: `${duration}ms`,
-      resultLength: result.length
-    });
-
-    return {
-      content: [
-        {
-          type: 'text',
-          text: result,
-        },
-      ],
-    };
-
-  } catch (error) {
-    const duration = Date.now() - startTime;
-    logger.error('Tool execution failed', {
-      toolName: name,
-      duration: `${duration}ms`,
-      error: error instanceof Error ? error.message : String(error)
-    });
-
-    throw new Error(`Tool execution failed: ${error instanceof Error ? error.message : String(error)}`);
-  }
+// Root endpoint with API information
+app.get('/', (req, res) => {
+  res.json({
+    name: 'Sales Intelligence MCP Server',
+    version: '1.0.0',
+    description: 'MCP server for sales intelligence, competitive analysis, and playbook discovery',
+    endpoints: {
+      health: '/health',
+      tools: '/tools',
+      execute: '/tools/:toolName'
+    },
+    documentation: 'https://github.com/your-username/sales-intelligence-mcp#readme'
+  });
 });
 
-// Handle server shutdown gracefully
-process.on('SIGINT', () => {
-  logger.info('Sales Intelligence MCP server shutting down...');
-  process.exit(0);
-});
+// Error handling middleware
+app.use((error: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  logger.error('Unhandled error:', error);
 
-process.on('SIGTERM', () => {
-  logger.info('Sales Intelligence MCP server terminated');
-  process.exit(0);
+  res.status(500).json({
+    error: 'Internal server error',
+    message: error.message,
+    timestamp: new Date().toISOString()
+  });
 });
 
 // Start server
-const transport = new StdioServerTransport();
-server.connect(transport);
+app.listen(PORT, () => {
+  logger.info(`🚀 Sales Intelligence MCP Server running on port ${PORT}`);
+  logger.info(`📊 Health check: http://localhost:${PORT}/health`);
+  logger.info(`🛠️  Available tools: http://localhost:${PORT}/tools`);
+  logger.info(`📖 Documentation: https://github.com/your-username/sales-intelligence-mcp#readme`);
 
-logger.info('🚀 Sales Intelligence MCP server started', {
-  version: '1.0.0',
-  baseUrl: config.baseUrl,
-  timeout: config.timeout,
-  toolsAvailable: Object.keys(tools).length
+  // Log configuration
+  logger.info('Configuration:', {
+    port: PORT,
+    environment: process.env.NODE_ENV || 'development',
+    logLevel: process.env.MCP_LOG_LEVEL || 'info',
+    toolsCount: Object.keys(tools).length
+  });
 });
 
-// Health check endpoint (via stderr so it doesn't interfere with stdio transport)
-console.error('✅ Sales Intelligence MCP server is ready for connections');
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  logger.info('SIGTERM received, shutting down gracefully');
+  process.exit(0);
+});
+
+process.on('SIGINT', () => {
+  logger.info('SIGINT received, shutting down gracefully');
+  process.exit(0);
+});
+
+export default app;

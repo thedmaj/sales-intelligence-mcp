@@ -1,324 +1,196 @@
 import { z } from 'zod';
-import { ApiClient } from '../auth/apiClient.js';
-import { logger } from '../utils/logger.js';
+import { distance } from 'fastest-levenshtein';
+import { searchPlays, demoPlays } from '../data/demoData.js';
+import type { MCPTool } from './index.js';
 
-export const findSalesContentTool = {
-  name: 'find_sales_content',
-  description: 'Search for playbooks, plays, and sales content using natural language queries. Supports filtering by solution, market segment, play type, and more.',
-  inputSchema: {
-    type: 'object',
-    properties: {
-      query: {
-        type: 'string',
-        description: 'Natural language search query (e.g., "account verification banking", "fraud prevention demo", "competitive positioning against EWS")'
-      },
-      solution: {
-        type: 'string',
-        description: 'Filter by solution name (e.g., "Account Verification", "Fraud Prevention")'
-      },
-      segment: {
-        type: 'string',
-        description: 'Filter by market segment (e.g., "Enterprise", "SMB", "Banking")'
-      },
-      vertical: {
-        type: 'string',
-        description: 'Filter by industry vertical (e.g., "Banking", "Fintech", "Wealth Management")'
-      },
-      industry: {
-        type: 'string',
-        description: 'Filter by specific industry (e.g., "Community Banks", "Regional Banks")'
-      },
-      playType: {
-        type: 'string',
-        enum: [
-          'DISCOVERY',
-          'DEMO',
-          'OBJECTION_HANDLING',
-          'COMPETITIVE_POSITIONING',
-          'VALUE_PROPOSITION',
-          'TECHNICAL_DEEP_DIVE',
-          'CONTENT_DELIVERY',
-          'PROCESS'
-        ],
-        description: 'Filter by play type including Process workflows for POCs, onboarding, etc.'
-      },
-      competitor: {
-        type: 'string',
-        description: 'Filter by competitor mentions (e.g., "Early Warning System", "EWS", "Stripe")'
-      },
-      limit: {
-        type: 'number',
-        minimum: 1,
-        maximum: 50,
-        default: 10,
-        description: 'Maximum number of results to return (1-50, default: 10)'
-      },
-      includeRelationships: {
-        type: 'boolean',
-        default: false,
-        description: 'Include related content and supporting materials'
-      }
+const inputSchema = {
+  type: "object",
+  properties: {
+    query: {
+      type: "string",
+      description: "Natural language search query for sales content"
     },
-    required: ['query'],
-    additionalProperties: false
+    solution: {
+      type: "string",
+      description: "Filter by solution name (e.g., Account Verification, Fraud Prevention, Payment Processing)"
+    },
+    segment: {
+      type: "string",
+      description: "Filter by market segment (Enterprise, Mid-Market, SMB)"
+    },
+    playType: {
+      type: "string",
+      description: "Filter by play type",
+      enum: ["DISCOVERY", "DEMO", "VALUE_PROPOSITION", "COMPETITIVE_POSITIONING", "TECHNICAL_DEEP_DIVE", "OBJECTION_HANDLING", "CONTENT_DELIVERY", "PROCESS"]
+    },
+    limit: {
+      type: "number",
+      description: "Maximum number of results to return",
+      default: 10,
+      minimum: 1,
+      maximum: 50
+    },
+    includeRelationships: {
+      type: "boolean",
+      description: "Include related content and cross-references",
+      default: false
+    }
   },
+  required: ["query"]
+} as const;
 
-  async handler(args: any, apiClient: ApiClient): Promise<string> {
-    try {
-      // Validate input
-      const input = z.object({
-        query: z.string().min(1, 'Query cannot be empty'),
-        solution: z.string().optional(),
-        segment: z.string().optional(),
-        vertical: z.string().optional(),
-        industry: z.string().optional(),
-        playType: z.enum([
-          'DISCOVERY',
-          'DEMO',
-          'OBJECTION_HANDLING',
-          'COMPETITIVE_POSITIONING',
-          'VALUE_PROPOSITION',
-          'TECHNICAL_DEEP_DIVE',
-          'CONTENT_DELIVERY',
-          'PROCESS'
-        ]).optional(),
-        competitor: z.string().optional(),
-        limit: z.number().min(1).max(50).default(10),
-        includeRelationships: z.boolean().default(false)
-      }).parse(args);
+const querySchema = z.object({
+  query: z.string().min(1, "Query cannot be empty"),
+  solution: z.string().optional(),
+  segment: z.string().optional(),
+  playType: z.enum(["DISCOVERY", "DEMO", "VALUE_PROPOSITION", "COMPETITIVE_POSITIONING", "TECHNICAL_DEEP_DIVE", "OBJECTION_HANDLING", "CONTENT_DELIVERY", "PROCESS"]).optional(),
+  limit: z.number().min(1).max(50).default(10),
+  includeRelationships: z.boolean().default(false)
+});
 
-      logger.debug('Processing sales content search', {
-        query: input.query,
-        filters: {
-          solution: input.solution,
-          segment: input.segment,
-          playType: input.playType
-        }
-      });
+async function handler(args: any, apiClient: any): Promise<string> {
+  try {
+    // Validate input
+    const input = querySchema.parse(args);
 
-      // Make API request
-      const response = await apiClient.request<{
-        content: Array<{ type: string; text: string }>;
-      }>('/find_sales_content', input);
+    // Search demo data
+    const results = searchPlays(input.query, {
+      solution: input.solution,
+      segment: input.segment,
+      playType: input.playType
+    }).slice(0, input.limit);
 
-      // Parse the JSON response from the API
-      const apiData = JSON.parse(response.content[0].text);
-
-      if (!apiData.success) {
-        throw new Error(apiData.error || 'Search failed');
-      }
-
-      // Format results for user-friendly display
-      const { data } = apiData;
-      const plays = data.results?.plays || [];
-      const playbooks = data.results?.playbooks || [];
-
-      if (plays.length === 0 && playbooks.length === 0) {
-        return formatNoResultsMessage(input);
-      }
-
-      return formatSearchResults(data, input);
-
-    } catch (error) {
-      logger.error('Sales content search failed', {
-        error: error instanceof Error ? error.message : String(error),
-        args
-      });
-
-      if (error instanceof z.ZodError) {
-        return formatValidationError(error);
-      }
-
-      throw new Error(`Search failed: ${error instanceof Error ? error.message : String(error)}`);
+    if (results.length === 0) {
+      return formatNoResultsResponse(input.query, input);
     }
+
+    return formatSuccessResponse(results, input);
+
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return formatValidationError(error);
+    }
+    throw error;
   }
-};
-
-function formatSearchResults(data: any, input: any): string {
-  const plays = data.results?.plays || [];
-  const playbooks = data.results?.playbooks || [];
-  const metadata = data.metadata || {};
-
-  let result = `# 🎯 Sales Content Search Results\n\n`;
-  result += `**Query:** "${input.query}"\n`;
-  result += `**Results:** ${plays.length} plays found`;
-
-  if (metadata.queryTime) {
-    result += ` (${metadata.queryTime}ms)`;
-  }
-
-  if (metadata.cacheHit) {
-    result += ` 🚀 *cached*`;
-  }
-
-  result += `\n\n`;
-
-  // Add confidence and entity resolution info if available
-  if (data.confidence) {
-    result += `**Confidence:** ${Math.round(data.confidence * 100)}%\n`;
-  }
-
-  if (metadata.entityResolution?.resolved) {
-    const resolved = metadata.entityResolution.resolved;
-    const resolvedEntries = Object.entries(resolved).filter(([_, values]: [string, any]) => values.length > 0);
-
-    if (resolvedEntries.length > 0) {
-      result += `**Identified:** `;
-      result += resolvedEntries.map(([type, values]: [string, any]) =>
-        `${type}: ${values.join(', ')}`
-      ).join(', ');
-      result += `\n`;
-    }
-  }
-
-  result += `\n---\n\n`;
-
-  // Format plays
-  plays.forEach((play: any, index: number) => {
-    result += `## ${index + 1}. ${play.name}\n\n`;
-
-    if (play.playbook?.name) {
-      result += `**📚 Playbook:** ${play.playbook.name}\n`;
-    }
-
-    if (play.solution?.name) {
-      result += `**🛠️ Solution:** ${play.solution.name}\n`;
-    }
-
-    if (play.genericPlayType) {
-      const playTypeLabel = formatPlayType(play.genericPlayType);
-      result += `**🎲 Type:** ${playTypeLabel}\n`;
-    }
-
-    if (play.sequenceOrder) {
-      result += `**📋 Sequence:** ${play.sequenceOrder}\n`;
-    }
-
-    // Special formatting for PROCESS play types
-    if (play.genericPlayType === 'PROCESS' && play.description) {
-      const processInfo = extractProcessInfo(play.description);
-      if (processInfo.processType) {
-        result += `**⚙️ Process Type:** ${processInfo.processType}\n`;
-      }
-      if (processInfo.steps.length > 0) {
-        result += `**📝 Key Steps:** ${processInfo.steps.slice(0, 3).join(', ')}${processInfo.steps.length > 3 ? '...' : ''}\n`;
-      }
-      if (processInfo.roles.length > 0) {
-        result += `**👥 Roles:** ${processInfo.roles.join(', ')}\n`;
-      }
-    }
-
-    if (play.description) {
-      result += `\n**Description:**\n${play.description}\n`;
-    }
-
-    result += `\n---\n\n`;
-  });
-
-  // Add summary insights
-  if (plays.length > 0) {
-    result += `## 💡 Quick Insights\n\n`;
-
-    const playTypes = [...new Set(plays.map((p: any) => p.genericPlayType).filter(Boolean))];
-    if (playTypes.length > 0) {
-      result += `**Play Types Found:** ${playTypes.map(formatPlayType).join(', ')}\n`;
-    }
-
-    const solutions = [...new Set(plays.map((p: any) => p.solution?.name).filter(Boolean))];
-    if (solutions.length > 0) {
-      result += `**Solutions Covered:** ${solutions.join(', ')}\n`;
-    }
-
-    const segments = [...new Set(plays.map((p: any) => p.playbook?.segment?.name).filter(Boolean))];
-    if (segments.length > 0) {
-      result += `**Market Segments:** ${segments.join(', ')}\n`;
-    }
-  }
-
-  // Add filters applied
-  const appliedFilters = [];
-  if (input.solution) appliedFilters.push(`Solution: ${input.solution}`);
-  if (input.segment) appliedFilters.push(`Segment: ${input.segment}`);
-  if (input.playType) appliedFilters.push(`Type: ${formatPlayType(input.playType)}`);
-  if (input.competitor) appliedFilters.push(`Competitor: ${input.competitor}`);
-
-  if (appliedFilters.length > 0) {
-    result += `\n**🔍 Filters Applied:** ${appliedFilters.join(', ')}\n`;
-  }
-
-  return result;
 }
 
-function formatNoResultsMessage(input: any): string {
-  let result = `# 🔍 No Sales Content Found\n\n`;
-  result += `**Query:** "${input.query}"\n\n`;
-  result += `No matching plays or playbooks were found. Try:\n\n`;
-  result += `- **Broadening your search:** Use more general terms\n`;
-  result += `- **Different keywords:** Try synonyms or related terms\n`;
-  result += `- **Removing filters:** Check if solution/segment filters are too restrictive\n`;
-  result += `- **Checking spelling:** Verify entity names are correct\n\n`;
+function formatSuccessResponse(results: any[], input: any): string {
+  const summary = `Found ${results.length} ${results.length === 1 ? 'play' : 'plays'} matching your query${
+    input.solution ? ` for ${input.solution}` : ''
+  }${input.segment ? ` in ${input.segment} segment` : ''}.`;
 
-  if (input.solution || input.segment || input.playType) {
-    result += `**Active Filters:**\n`;
-    if (input.solution) result += `- Solution: ${input.solution}\n`;
-    if (input.segment) result += `- Segment: ${input.segment}\n`;
-    if (input.playType) result += `- Play Type: ${formatPlayType(input.playType)}\n`;
-    result += `\nTry removing some filters to get broader results.\n`;
+  let response = `# Sales Content Search Results\n\n## Summary\n${summary}\n\n## Results\n\n`;
+
+  results.forEach((play, index) => {
+    response += `### ${index + 1}. ${play.name}\n`;
+    response += `- **Type**: ${formatPlayType(play.genericPlayType)}\n`;
+    response += `- **Playbook**: ${play.playbook.name}\n`;
+    response += `- **Solution**: ${play.solution.name}\n`;
+    if (play.segment) {
+      response += `- **Segment**: ${play.segment.name}\n`;
+    }
+    response += `- **Description**: ${play.description}\n`;
+    response += `- **Use When**: ${getUseWhenAdvice(play.genericPlayType)}\n\n`;
+  });
+
+  // Add insights
+  response += `## Insights\n`;
+  const playTypes = [...new Set(results.map(p => p.genericPlayType))];
+  response += `- Coverage across ${playTypes.length} play types: ${playTypes.map(formatPlayType).join(', ')}\n`;
+
+  const solutions = [...new Set(results.map(p => p.solution.name))];
+  if (solutions.length > 1) {
+    response += `- Results span multiple solutions: ${solutions.join(', ')}\n`;
   }
 
-  return result;
+  // Add recommendations
+  response += `\n## Recommendations\n`;
+  if (playTypes.includes('DISCOVERY')) {
+    response += `- Start with discovery plays to understand client needs\n`;
+  }
+  if (playTypes.includes('COMPETITIVE_POSITIONING')) {
+    response += `- Review competitive positioning plays for differentiation\n`;
+  }
+  if (playTypes.includes('DEMO')) {
+    response += `- Prepare demo plays for technical evaluation phase\n`;
+  }
+
+  response += `- Consider reviewing related content in the same playbook\n`;
+  response += `- Check for updated competitive intelligence if competitors are mentioned\n`;
+
+  return response;
+}
+
+function formatNoResultsResponse(query: string, input: any): string {
+  let response = `# No Sales Content Found\n\n`;
+  response += `No content found matching "${query}"`;
+
+  if (input.solution || input.segment || input.playType) {
+    response += ` with the specified filters`;
+  }
+  response += `.\n\n`;
+
+  response += `## Suggestions\n\n`;
+  response += `**Try:**\n`;
+  response += `- Broader search terms (e.g., "fraud" instead of "real-time fraud detection")\n`;
+  response += `- Different solution names (Account Verification, Fraud Prevention, Payment Processing)\n`;
+  response += `- Removing filters to see all available content\n`;
+  response += `- Different play types (Discovery, Demo, Value Proposition, etc.)\n\n`;
+
+  response += `**Available Solutions:**\n`;
+  const availableSolutions = [...new Set(demoPlays.map(p => p.solution.name))];
+  availableSolutions.forEach(solution => {
+    response += `- ${solution}\n`;
+  });
+
+  response += `\n**Available Play Types:**\n`;
+  const availableTypes = [...new Set(demoPlays.map(p => p.genericPlayType))];
+  availableTypes.forEach(type => {
+    response += `- ${formatPlayType(type)}\n`;
+  });
+
+  return response;
 }
 
 function formatValidationError(error: z.ZodError): string {
-  const issues = error.errors.map(e => `- ${e.path.join('.')}: ${e.message}`).join('\n');
-  return `❌ **Invalid Input**\n\n${issues}\n\nPlease check your query parameters and try again.`;
+  const issues = error.issues.map(issue =>
+    `- ${issue.path.join('.')}: ${issue.message}`
+  ).join('\n');
+
+  return `# Invalid Input\n\nPlease check the following:\n\n${issues}\n\n## Required Parameters\n- **query**: Your search query (required)\n\n## Optional Parameters\n- **solution**: Solution name filter\n- **segment**: Market segment filter\n- **playType**: Type of play to find\n- **limit**: Number of results (1-50, default: 10)`;
 }
 
 function formatPlayType(playType: string): string {
-  const typeLabels: Record<string, string> = {
+  const typeMap: Record<string, string> = {
     'DISCOVERY': 'Discovery',
     'DEMO': 'Demo',
-    'OBJECTION_HANDLING': 'Objection Handling',
-    'COMPETITIVE_POSITIONING': 'Competitive Positioning',
     'VALUE_PROPOSITION': 'Value Proposition',
+    'COMPETITIVE_POSITIONING': 'Competitive Positioning',
     'TECHNICAL_DEEP_DIVE': 'Technical Deep Dive',
+    'OBJECTION_HANDLING': 'Objection Handling',
     'CONTENT_DELIVERY': 'Content Delivery',
-    'PROCESS': 'Process'
+    'PROCESS': 'Process/Workflow'
   };
-
-  return typeLabels[playType] || playType;
+  return typeMap[playType] || playType;
 }
 
-function extractProcessInfo(description: string): {
-  processType: string;
-  steps: string[];
-  roles: string[];
-} {
-  const processType = inferProcessType(description);
-  const steps = extractProcessSteps(description);
-  const roles = extractRoleAssignments(description);
-
-  return { processType, steps, roles };
+function getUseWhenAdvice(playType: string): string {
+  const adviceMap: Record<string, string> = {
+    'DISCOVERY': 'Initial client meetings, needs assessment, and qualification',
+    'DEMO': 'Technical evaluations, proof-of-concept presentations',
+    'VALUE_PROPOSITION': 'Budget discussions, ROI conversations, executive presentations',
+    'COMPETITIVE_POSITIONING': 'When competitors are mentioned or being evaluated',
+    'TECHNICAL_DEEP_DIVE': 'Technical stakeholder meetings, integration planning',
+    'OBJECTION_HANDLING': 'Addressing client concerns, risk discussions',
+    'CONTENT_DELIVERY': 'Educational content, thought leadership sharing',
+    'PROCESS': 'Implementation planning, POC setup, workflow discussions'
+  };
+  return adviceMap[playType] || 'Various sales situations depending on context';
 }
 
-function inferProcessType(description: string): string {
-  const desc = description.toLowerCase();
-  if (desc.includes('poc')) return 'POC Validation';
-  if (desc.includes('onboarding')) return 'Client Onboarding';
-  if (desc.includes('implementation')) return 'Implementation';
-  if (desc.includes('retro')) return 'Retrospective Analysis';
-  if (desc.includes('evaluation')) return 'Evaluation Process';
-  return 'General Process';
-}
-
-function extractProcessSteps(description: string): string[] {
-  const stepRegex = /\d+\.\s*([^\n]+)/g;
-  const steps = Array.from(description.matchAll(stepRegex), m => m[1]);
-  return steps.slice(0, 5); // Return up to 5 steps
-}
-
-function extractRoleAssignments(description: string): string[] {
-  const roleRegex = /(?:owner|responsible|assigned):\s*([^\n,]+)/gi;
-  const roles = Array.from(description.matchAll(roleRegex), m => m[1].trim());
-  return roles;
-}
+export const findSalesContentTool: MCPTool = {
+  name: "find_sales_content",
+  description: "Search for playbooks, plays, and sales content using natural language queries. Find relevant content for specific solutions, market segments, and play types.",
+  inputSchema,
+  handler
+};

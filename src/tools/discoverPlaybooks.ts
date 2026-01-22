@@ -1,366 +1,265 @@
 import { z } from 'zod';
-import { ApiClient } from '../auth/apiClient.js';
-import { logger } from '../utils/logger.js';
+import { searchPlaybooks, demoPlaybooks } from '../data/demoData.js';
+import type { MCPTool } from './index.js';
 
-export const discoverPlaybooksTool = {
-  name: 'discover_playbooks',
-  description: 'Discover available playbooks for solution-segment combinations and identify content gaps. Shows what playbooks exist and highlights missing coverage areas.',
-  inputSchema: {
-    type: 'object',
-    properties: {
-      solution: {
-        type: 'string',
-        description: 'Solution name or category (e.g., "Account Verification", "Fraud Prevention", "Payment Processing")'
-      },
-      segment: {
-        type: 'string',
-        description: 'Market segment (e.g., "Enterprise", "SMB", "Banking", "Fintech")'
-      },
-      vertical: {
-        type: 'string',
-        description: 'Industry vertical (e.g., "Banking", "Wealth Management", "Insurance")'
-      },
-      showGaps: {
-        type: 'boolean',
-        default: false,
-        description: 'Highlight missing content gaps and coverage analysis'
-      }
+const inputSchema = {
+  type: "object",
+  properties: {
+    solution: {
+      type: "string",
+      description: "Filter by solution (e.g., Account Verification, Fraud Prevention, Payment Processing)"
     },
-    additionalProperties: false
-  },
-
-  async handler(args: any, apiClient: ApiClient): Promise<string> {
-    try {
-      // Validate input
-      const input = z.object({
-        solution: z.string().optional(),
-        segment: z.string().optional(),
-        vertical: z.string().optional(),
-        showGaps: z.boolean().default(false)
-      }).parse(args);
-
-      // At least one filter should be provided
-      if (!input.solution && !input.segment && !input.vertical) {
-        throw new Error('Please provide at least one filter: solution, segment, or vertical');
-      }
-
-      logger.debug('Processing playbook discovery', {
-        filters: {
-          solution: input.solution,
-          segment: input.segment,
-          vertical: input.vertical
-        },
-        showGaps: input.showGaps
-      });
-
-      // Make API request
-      const response = await apiClient.request<{
-        content: Array<{ type: string; text: string }>;
-      }>('/discover_playbooks', input);
-
-      // Parse the response
-      const discoveryData = JSON.parse(response.content[0].text);
-
-      return formatPlaybookDiscovery(discoveryData, input);
-
-    } catch (error) {
-      logger.error('Playbook discovery failed', {
-        error: error instanceof Error ? error.message : String(error),
-        args
-      });
-
-      if (error instanceof z.ZodError) {
-        return formatValidationError(error);
-      }
-
-      throw new Error(`Playbook discovery failed: ${error instanceof Error ? error.message : String(error)}`);
+    segment: {
+      type: "string",
+      description: "Filter by market segment (Enterprise, Mid-Market, SMB)"
+    },
+    vertical: {
+      type: "string",
+      description: "Filter by vertical market (e.g., Banking, Fintech, Insurance)"
+    },
+    industry: {
+      type: "string",
+      description: "Filter by industry focus"
+    },
+    showGaps: {
+      type: "boolean",
+      description: "Include gap analysis showing missing play types",
+      default: true
     }
   }
-};
+} as const;
 
-function formatPlaybookDiscovery(data: any, input: any): string {
-  const playbooks = data.playbooks || [];
-  const total = data.total || playbooks.length;
-  const gaps = data.gaps;
+const playbookSchema = z.object({
+  solution: z.string().optional(),
+  segment: z.string().optional(),
+  vertical: z.string().optional(),
+  industry: z.string().optional(),
+  showGaps: z.boolean().default(true)
+});
 
-  let result = `# 📚 Playbook Discovery\n\n`;
+async function handler(args: any, apiClient: any): Promise<string> {
+  try {
+    const input = playbookSchema.parse(args);
 
-  // Show applied filters
+    // Require at least one filter
+    if (!input.solution && !input.segment && !input.vertical && !input.industry) {
+      return formatMissingFiltersError();
+    }
+
+    const playbooks = searchPlaybooks({
+      solution: input.solution,
+      segment: input.segment,
+      vertical: input.vertical,
+      industry: input.industry
+    });
+
+    if (playbooks.length === 0) {
+      return formatNoPlaybooksFound(input);
+    }
+
+    return formatPlaybookResults(playbooks, input);
+
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return formatValidationError(error);
+    }
+    throw error;
+  }
+}
+
+function formatPlaybookResults(playbooks: any[], input: any): string {
+  let response = `# Playbook Discovery\n\n`;
+
+  // Summary
+  response += `## Summary\n`;
+  response += `Found ${playbooks.length} playbook${playbooks.length === 1 ? '' : 's'} matching your criteria`;
+
   const filters = [];
-  if (input.solution) filters.push(`Solution: ${input.solution}`);
-  if (input.segment) filters.push(`Segment: ${input.segment}`);
-  if (input.vertical) filters.push(`Vertical: ${input.vertical}`);
+  if (input.solution) filters.push(`solution: ${input.solution}`);
+  if (input.segment) filters.push(`segment: ${input.segment}`);
+  if (input.vertical) filters.push(`vertical: ${input.vertical}`);
+  if (input.industry) filters.push(`industry: ${input.industry}`);
 
   if (filters.length > 0) {
-    result += `**Search Criteria:** ${filters.join(' | ')}\n`;
+    response += ` (${filters.join(', ')})`;
   }
+  response += `.\n\n`;
 
-  result += `**Found:** ${total} playbook${total !== 1 ? 's' : ''}\n\n`;
+  // Playbook details
+  response += `## Available Playbooks\n\n`;
 
-  if (playbooks.length === 0) {
-    return formatNoPlaybooksFound(input);
-  }
+  playbooks.forEach((playbook, index) => {
+    response += `### ${index + 1}. ${playbook.name}\n`;
+    response += `- **Solution**: ${playbook.solution.name}\n`;
 
-  result += `---\n\n`;
+    if (playbook.segment) {
+      response += `- **Segment**: ${playbook.segment.name}\n`;
+    }
 
-  // Format each playbook
-  playbooks.forEach((playbook: any, index: number) => {
-    result += formatSinglePlaybook(playbook, index + 1);
-    result += `\n---\n\n`;
+    response += `- **Play Count**: ${playbook.playCount} plays\n`;
+    response += `- **Play Types**: ${playbook.playTypes.join(', ')}\n`;
+    response += `- **Description**: ${playbook.description}\n\n`;
   });
 
-  // Coverage analysis
-  if (playbooks.length > 0) {
-    result += `## 📊 Coverage Analysis\n\n`;
-
-    const allPlayTypes = extractAllPlayTypes(playbooks);
-    if (allPlayTypes.length > 0) {
-      result += `**Play Types Covered:** ${allPlayTypes.join(', ')}\n`;
-    }
-
-    const solutions = [...new Set(playbooks.map((p: any) => p.solution?.name).filter(Boolean))];
-    if (solutions.length > 0) {
-      result += `**Solutions:** ${solutions.join(', ')}\n`;
-    }
-
-    const segments = [...new Set(playbooks.map((p: any) => p.segment?.name).filter(Boolean))];
-    if (segments.length > 0) {
-      result += `**Market Segments:** ${segments.join(', ')}\n`;
-    }
-
-    const totalPlays = playbooks.reduce((sum: number, p: any) => sum + (p.playCount || 0), 0);
-    const avgPlaysPerPlaybook = Math.round(totalPlays / playbooks.length);
-
-    result += `**Total Plays:** ${totalPlays} (avg: ${avgPlaysPerPlaybook} per playbook)\n`;
-
-    result += `\n`;
-  }
-
   // Gap analysis
-  if (input.showGaps && gaps) {
-    result += formatGapAnalysis(gaps, input);
+  if (input.showGaps) {
+    response += formatGapAnalysis(playbooks);
   }
 
   // Recommendations
-  result += `## 💡 Recommendations\n\n`;
+  response += `## Recommendations\n\n`;
+  response += `**Content Strategy:**\n`;
 
-  if (playbooks.length === 1) {
-    result += `✅ **Single playbook found** - Review this playbook for completeness\n`;
-  } else if (playbooks.length > 5) {
-    result += `📈 **Multiple playbooks available** - Consider consolidating similar content\n`;
-  } else {
-    result += `👍 **Good coverage** - ${playbooks.length} playbooks provide good foundation\n`;
+  const totalPlays = playbooks.reduce((sum, p) => sum + p.playCount, 0);
+  const avgPlaysPerPlaybook = Math.round(totalPlays / playbooks.length);
+
+  if (avgPlaysPerPlaybook < 6) {
+    response += `- Consider expanding playbooks (average: ${avgPlaysPerPlaybook} plays per playbook)\n`;
   }
 
-  if (input.showGaps && gaps?.missingPlayTypes?.length > 0) {
-    result += `🔍 **Content gaps identified** - Consider creating plays for missing types\n`;
+  const allPlayTypes = new Set();
+  playbooks.forEach(p => p.playTypes.forEach((type: string) => allPlayTypes.add(type)));
+
+  if (!allPlayTypes.has('COMPETITIVE_POSITIONING')) {
+    response += `- Add competitive positioning plays to strengthen market differentiation\n`;
+  }
+  if (!allPlayTypes.has('PROCESS')) {
+    response += `- Consider adding process/workflow plays for implementation guidance\n`;
+  }
+  if (!allPlayTypes.has('VALUE_PROPOSITION')) {
+    response += `- Include value proposition plays for ROI conversations\n`;
   }
 
-  if (!input.solution && !input.segment) {
-    result += `🎯 **Add filters** - Specify solution or segment for more targeted results\n`;
-  }
+  response += `- Review playbook usage metrics to identify most effective content\n`;
+  response += `- Regular updates ensure content stays current with market changes\n`;
 
-  result += `📋 **Next steps:** Review individual playbooks and enhance based on gaps\n`;
-
-  return result;
+  return response;
 }
 
-function formatSinglePlaybook(playbook: any, index: number): string {
-  let result = `## ${index}. ${playbook.name}\n\n`;
+function formatGapAnalysis(playbooks: any[]): string {
+  const allPossiblePlayTypes = ['DISCOVERY', 'DEMO', 'VALUE_PROPOSITION', 'COMPETITIVE_POSITIONING', 'TECHNICAL_DEEP_DIVE', 'OBJECTION_HANDLING', 'CONTENT_DELIVERY', 'PROCESS'];
 
-  if (playbook.description) {
-    result += `**Description:** ${playbook.description}\n`;
-  }
-
-  if (playbook.solution?.name) {
-    result += `**🛠️ Solution:** ${playbook.solution.name}\n`;
-  }
-
-  if (playbook.segment?.name) {
-    result += `**🎯 Segment:** ${playbook.segment.name}\n`;
-  }
-
-  result += `**📋 Plays:** ${playbook.playCount || 0}\n`;
-
-  if (playbook.playTypes && playbook.playTypes.length > 0) {
-    result += `**🎲 Play Types:** ${playbook.playTypes.map(formatPlayType).join(', ')}\n`;
-  }
-
-  if (playbook.status && playbook.status !== 'active') {
-    result += `**📊 Status:** ${formatStatus(playbook.status)}\n`;
-  }
-
-  // Show creation/update info if available
-  if (playbook.createdAt) {
-    const createdDate = new Date(playbook.createdAt).toLocaleDateString();
-    result += `**📅 Created:** ${createdDate}\n`;
-  }
-
-  if (playbook.updatedAt && playbook.updatedAt !== playbook.createdAt) {
-    const updatedDate = new Date(playbook.updatedAt).toLocaleDateString();
-    result += `**🔄 Updated:** ${updatedDate}\n`;
-  }
-
-  return result;
-}
-
-function formatGapAnalysis(gaps: any, input: any): string {
-  let result = `## 🔍 Gap Analysis\n\n`;
-
-  if (gaps.coveragePercentage !== undefined) {
-    const percentage = gaps.coveragePercentage;
-    const status = percentage >= 80 ? '🟢' : percentage >= 60 ? '🟡' : '🔴';
-    result += `**Coverage Score:** ${status} ${percentage}% of standard play types covered\n\n`;
-  }
-
-  if (gaps.missingPlayTypes && gaps.missingPlayTypes.length > 0) {
-    result += `**Missing Play Types:**\n`;
-    gaps.missingPlayTypes.forEach((playType: string) => {
-      result += `- ${formatPlayType(playType)}: ${getPlayTypeDescription(playType)}\n`;
-    });
-    result += `\n`;
-  }
-
-  if (gaps.missingSegments && gaps.missingSegments.length > 0) {
-    result += `**Potential Segment Gaps:**\n`;
-    gaps.missingSegments.forEach((segment: string) => {
-      result += `- ${segment}\n`;
-    });
-    result += `\n`;
-  }
-
-  if (gaps.recommendations && gaps.recommendations.length > 0) {
-    result += `**Gap Filling Recommendations:**\n`;
-    gaps.recommendations.forEach((rec: string, index: number) => {
-      result += `${index + 1}. ${rec}\n`;
-    });
-    result += `\n`;
-  }
-
-  // Priority suggestions based on missing content
-  if (gaps.missingPlayTypes && gaps.missingPlayTypes.length > 0) {
-    result += `**Priority Actions:**\n`;
-    const highPriorityTypes = ['DISCOVERY', 'DEMO', 'OBJECTION_HANDLING', 'VALUE_PROPOSITION'];
-    const missingHighPriority = gaps.missingPlayTypes.filter((type: string) =>
-      highPriorityTypes.includes(type)
-    );
-
-    if (missingHighPriority.length > 0) {
-      result += `🔥 **High Priority:** Create ${missingHighPriority.map(formatPlayType).join(', ')} plays\n`;
-    }
-
-    const missingProcess = gaps.missingPlayTypes.includes('PROCESS');
-    if (missingProcess) {
-      result += `⚙️ **Process Workflows:** Add POC and implementation procedures\n`;
-    }
-
-    const missingCompetitive = gaps.missingPlayTypes.includes('COMPETITIVE_POSITIONING');
-    if (missingCompetitive) {
-      result += `🥊 **Competitive Intel:** Develop competitive positioning strategies\n`;
-    }
-
-    result += `\n`;
-  }
-
-  return result;
-}
-
-function formatNoPlaybooksFound(input: any): string {
-  let result = `# 🔍 No Playbooks Found\n\n`;
-
-  const filters = [];
-  if (input.solution) filters.push(`Solution: ${input.solution}`);
-  if (input.segment) filters.push(`Segment: ${input.segment}`);
-  if (input.vertical) filters.push(`Vertical: ${input.vertical}`);
-
-  if (filters.length > 0) {
-    result += `**Search Criteria:** ${filters.join(' | ')}\n\n`;
-  }
-
-  result += `No playbooks match your criteria. This could indicate:\n\n`;
-  result += `**🔍 Search Issues:**\n`;
-  result += `- Spelling variations in solution/segment names\n`;
-  result += `- Filters are too restrictive\n`;
-  result += `- Entity names don't match database exactly\n\n`;
-
-  result += `**📝 Content Gap:**\n`;
-  result += `- This solution-segment combination lacks playbooks\n`;
-  result += `- Opportunity to create new sales enablement content\n`;
-  result += `- Consider developing playbooks for this area\n\n`;
-
-  result += `**🎯 Suggested Actions:**\n`;
-  result += `1. **Broaden search:** Try removing some filters\n`;
-  result += `2. **Check spelling:** Verify solution/segment names\n`;
-  result += `3. **Explore similar:** Look for related solutions or segments\n`;
-  result += `4. **Create content:** Consider this a content creation opportunity\n\n`;
-
-  // Suggest expanding search
-  if (input.solution && input.segment) {
-    result += `**Try These Searches:**\n`;
-    result += `- Just solution: \`solution: "${input.solution}"\`\n`;
-    result += `- Just segment: \`segment: "${input.segment}"\`\n`;
-    if (input.vertical) {
-      result += `- Just vertical: \`vertical: "${input.vertical}"\`\n`;
-    }
-  }
-
-  return result;
-}
-
-function formatValidationError(error: z.ZodError): string {
-  const issues = error.errors.map(e => `- ${e.path.join('.')}: ${e.message}`).join('\n');
-  return `❌ **Invalid Input**\n\n${issues}\n\nPlease provide at least one filter (solution, segment, or vertical).`;
-}
-
-function formatPlayType(playType: string): string {
-  const typeLabels: Record<string, string> = {
-    'DISCOVERY': 'Discovery',
-    'DEMO': 'Demo',
-    'OBJECTION_HANDLING': 'Objection Handling',
-    'COMPETITIVE_POSITIONING': 'Competitive Positioning',
-    'VALUE_PROPOSITION': 'Value Proposition',
-    'TECHNICAL_DEEP_DIVE': 'Technical Deep Dive',
-    'CONTENT_DELIVERY': 'Content Delivery',
-    'PROCESS': 'Process'
-  };
-
-  return typeLabels[playType] || playType;
-}
-
-function formatStatus(status: string): string {
-  const statusLabels: Record<string, string> = {
-    'active': '✅ Active',
-    'draft': '📝 Draft',
-    'archived': '📦 Archived',
-    'deprecated': '⚠️ Deprecated'
-  };
-
-  return statusLabels[status] || status;
-}
-
-function extractAllPlayTypes(playbooks: any[]): string[] {
-  const allTypes = new Set<string>();
-
+  const existingPlayTypes = new Set();
   playbooks.forEach(playbook => {
-    if (playbook.playTypes) {
-      playbook.playTypes.forEach((type: string) => allTypes.add(type));
+    playbook.playTypes.forEach((type: string) => existingPlayTypes.add(type));
+  });
+
+  const missingPlayTypes = allPossiblePlayTypes.filter(type => !existingPlayTypes.has(type));
+  const coveragePercentage = Math.round((existingPlayTypes.size / allPossiblePlayTypes.length) * 100);
+
+  let response = `## Gap Analysis\n\n`;
+  response += `### Coverage Score: ${coveragePercentage}%\n`;
+  response += `You have ${existingPlayTypes.size} out of ${allPossiblePlayTypes.length} possible play types.\n\n`;
+
+  if (missingPlayTypes.length > 0) {
+    response += `### Missing Play Types\n`;
+    missingPlayTypes.forEach(type => {
+      response += `- **${formatPlayTypeName(type)}**: ${getPlayTypeDescription(type)}\n`;
+    });
+    response += `\n`;
+  } else {
+    response += `### ✅ Complete Coverage\n`;
+    response += `Excellent! You have comprehensive play type coverage across all categories.\n\n`;
+  }
+
+  // Playbook-specific gaps
+  response += `### Playbook-Specific Analysis\n`;
+  playbooks.forEach(playbook => {
+    const playbookMissing = allPossiblePlayTypes.filter(type => !playbook.playTypes.includes(type));
+    if (playbookMissing.length > 0) {
+      response += `- **${playbook.name}**: Missing ${playbookMissing.slice(0, 3).map(formatPlayTypeName).join(', ')}`;
+      if (playbookMissing.length > 3) {
+        response += ` and ${playbookMissing.length - 3} more`;
+      }
+      response += `\n`;
     }
   });
 
-  return Array.from(allTypes).map(formatPlayType);
+  return response + `\n`;
+}
+
+function formatNoPlaybooksFound(input: any): string {
+  let response = `# No Playbooks Found\n\n`;
+
+  const filters = [];
+  if (input.solution) filters.push(`solution: ${input.solution}`);
+  if (input.segment) filters.push(`segment: ${input.segment}`);
+  if (input.vertical) filters.push(`vertical: ${input.vertical}`);
+  if (input.industry) filters.push(`industry: ${input.industry}`);
+
+  response += `No playbooks found matching your criteria`;
+  if (filters.length > 0) {
+    response += ` (${filters.join(', ')})`;
+  }
+  response += `.\n\n`;
+
+  response += `## Available Options\n\n`;
+
+  const availableSolutions = [...new Set(demoPlaybooks.map(p => p.solution.name))];
+  response += `**Solutions:**\n`;
+  availableSolutions.forEach(solution => {
+    response += `- ${solution}\n`;
+  });
+
+  const availableSegments = [...new Set(demoPlaybooks.filter(p => p.segment).map(p => p.segment!.name))];
+  if (availableSegments.length > 0) {
+    response += `\n**Segments:**\n`;
+    availableSegments.forEach(segment => {
+      response += `- ${segment}\n`;
+    });
+  }
+
+  response += `\n## Suggestions\n\n`;
+  response += `- Try broader search criteria\n`;
+  response += `- Remove some filters to see more options\n`;
+  response += `- Consider creating new playbooks for underserved areas\n`;
+
+  return response;
+}
+
+function formatMissingFiltersError(): string {
+  return `# Missing Search Criteria\n\nPlease provide at least one filter to discover playbooks:\n\n- **solution**: Filter by solution name\n- **segment**: Filter by market segment\n- **vertical**: Filter by vertical market\n- **industry**: Filter by industry focus\n\n## Example Usage\n\n\`\`\`json\n{\n  "solution": "Account Verification",\n  "segment": "Enterprise",\n  "showGaps": true\n}\n\`\`\``;
+}
+
+function formatValidationError(error: z.ZodError): string {
+  const issues = error.issues.map(issue =>
+    `- ${issue.path.join('.')}: ${issue.message}`
+  ).join('\n');
+
+  return `# Invalid Input\n\nPlease check the following:\n\n${issues}\n\n## Optional Parameters\n- **solution**: Solution name filter\n- **segment**: Market segment filter\n- **vertical**: Vertical market filter\n- **industry**: Industry filter\n- **showGaps**: Include gap analysis (default: true)`;
+}
+
+function formatPlayTypeName(playType: string): string {
+  const typeMap: Record<string, string> = {
+    'DISCOVERY': 'Discovery',
+    'DEMO': 'Demo',
+    'VALUE_PROPOSITION': 'Value Proposition',
+    'COMPETITIVE_POSITIONING': 'Competitive Positioning',
+    'TECHNICAL_DEEP_DIVE': 'Technical Deep Dive',
+    'OBJECTION_HANDLING': 'Objection Handling',
+    'CONTENT_DELIVERY': 'Content Delivery',
+    'PROCESS': 'Process/Workflow'
+  };
+  return typeMap[playType] || playType;
 }
 
 function getPlayTypeDescription(playType: string): string {
   const descriptions: Record<string, string> = {
-    'DISCOVERY': 'Understanding customer needs and qualification',
-    'DEMO': 'Product demonstrations and feature showcases',
-    'OBJECTION_HANDLING': 'Addressing customer concerns and objections',
-    'COMPETITIVE_POSITIONING': 'Differentiating against competitors',
-    'VALUE_PROPOSITION': 'Articulating ROI and business value',
-    'TECHNICAL_DEEP_DIVE': 'Technical validation and architecture',
-    'CONTENT_DELIVERY': 'Sharing collateral and supporting materials',
-    'PROCESS': 'Workflows, POCs, and implementation procedures'
+    'DISCOVERY': 'Questions and frameworks for understanding client needs',
+    'DEMO': 'Technical demonstrations and proof-of-concept content',
+    'VALUE_PROPOSITION': 'ROI calculators and business value content',
+    'COMPETITIVE_POSITIONING': 'Battle cards and differentiation content',
+    'TECHNICAL_DEEP_DIVE': 'In-depth technical content for expert audiences',
+    'OBJECTION_HANDLING': 'Responses to common objections and concerns',
+    'CONTENT_DELIVERY': 'Educational and thought leadership content',
+    'PROCESS': 'Implementation workflows and process guidance'
   };
-
-  return descriptions[playType] || 'Sales play activities';
+  return descriptions[playType] || 'Specialized sales content';
 }
+
+export const discoverPlaybooksTool: MCPTool = {
+  name: "discover_playbooks",
+  description: "Discover available playbooks and analyze content gaps. Filter by solution, segment, vertical, or industry to find relevant playbooks.",
+  inputSchema,
+  handler
+};
