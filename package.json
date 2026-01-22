@@ -1,6 +1,6 @@
 {
   "name": "@thedmaj/sales-intelligence-mcp",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "MCP server for sales intelligence, competitive analysis, and playbook discovery",
   "main": "dist/index.js",
   "bin": {

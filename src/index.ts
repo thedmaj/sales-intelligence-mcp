@@ -40,9 +40,8 @@ app.get('/health', (req, res) => {
   });
 });
 
-// MCP tool endpoints
-app.post('/tools/:toolName', async (req, res) => {
-  const { toolName } = req.params;
+// MCP tool endpoints - generic handler
+const handleToolExecution = async (toolName: string, body: any, res: express.Response) => {
   const tool = tools[toolName] as MCPTool;
 
   if (!tool) {
@@ -53,7 +52,7 @@ app.post('/tools/:toolName', async (req, res) => {
   }
 
   try {
-    const result = await tool.handler(req.body, null); // No API client needed for direct mode
+    const result = await tool.handler(body, null); // No API client needed for direct mode
 
     res.json({
       tool: toolName,
@@ -70,6 +69,29 @@ app.post('/tools/:toolName', async (req, res) => {
       timestamp: new Date().toISOString()
     });
   }
+};
+
+// Original tools endpoint (for backward compatibility)
+app.post('/tools/:toolName', async (req, res) => {
+  const { toolName } = req.params;
+  await handleToolExecution(toolName, req.body, res);
+});
+
+// MCP API endpoints (for production client compatibility)
+app.post('/api/mcp/find_sales_content', async (req, res) => {
+  await handleToolExecution('find_sales_content', req.body, res);
+});
+
+app.post('/api/mcp/get_competitive_intel', async (req, res) => {
+  await handleToolExecution('get_competitive_intel', req.body, res);
+});
+
+app.post('/api/mcp/find_process_workflows', async (req, res) => {
+  await handleToolExecution('find_process_workflows', req.body, res);
+});
+
+app.post('/api/mcp/discover_playbooks', async (req, res) => {
+  await handleToolExecution('discover_playbooks', req.body, res);
 });
 
 // List available tools
@@ -90,12 +112,18 @@ app.get('/tools', (req, res) => {
 app.get('/', (req, res) => {
   res.json({
     name: 'Sales Intelligence MCP Server',
-    version: '1.0.0',
+    version: '1.0.1',
     description: 'MCP server for sales intelligence, competitive analysis, and playbook discovery',
     endpoints: {
       health: '/health',
       tools: '/tools',
-      execute: '/tools/:toolName'
+      execute: '/tools/:toolName',
+      mcp_api: {
+        find_sales_content: '/api/mcp/find_sales_content',
+        get_competitive_intel: '/api/mcp/get_competitive_intel',
+        find_process_workflows: '/api/mcp/find_process_workflows',
+        discover_playbooks: '/api/mcp/discover_playbooks'
+      }
     },
     documentation: 'https://github.com/thedmaj/sales-intelligence-mcp#readme'
   });
