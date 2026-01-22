@@ -7,14 +7,16 @@ export interface Logger {
 
 class SimpleLogger implements Logger {
   private logLevel: string;
-  private levels = { error: 0, warn: 1, info: 2, debug: 3 };
+  private levels: Record<string, number> = { error: 0, warn: 1, info: 2, debug: 3 };
 
   constructor() {
     this.logLevel = process.env.MCP_LOG_LEVEL || 'error';
   }
 
   private shouldLog(level: string): boolean {
-    return this.levels[level] <= this.levels[this.logLevel];
+    const currentLevel = this.levels[this.logLevel] ?? 0;
+    const checkLevel = this.levels[level] ?? 0;
+    return checkLevel <= currentLevel;
   }
 
   private formatMessage(level: string, message: string, meta?: any): string {

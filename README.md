@@ -4,24 +4,28 @@ An MCP (Model Context Protocol) server that provides AI assistants like Cursor a
 
 ## 🚀 Quick Start with Cursor
 
-### 1. Install and Run
+### 1. Add MCP Configuration
 
-```bash
-# Run directly with npx (no installation needed)
-npx @thedmaj/sales-intelligence-mcp
+**Open Cursor Settings → Extensions → MCP Servers** and add:
 
-# Server will start on http://localhost:3001
+```json
+{
+  "sales_intelligence": {
+    "type": "stdio",
+    "command": "npx",
+    "args": ["-y", "@thedmaj/sales-intelligence-mcp"],
+    "env": {
+      "API_BASE_URL": "https://your-api-server.com",
+      "API_KEY": "your_api_key_here",
+      "MCP_LOG_LEVEL": "info"
+    }
+  }
+}
 ```
 
-### 2. Configure Cursor
+### 2. Restart Cursor
 
-1. **Open Cursor Settings** → **Extensions** → **MCP Servers**
-2. **Add New Server**:
-   - **Name**: `Sales Intelligence`
-   - **URL**: `http://localhost:3001`
-   - **Authentication**: `Bearer YOUR_API_KEY_HERE`
-
-### 3. Start Using in Cursor
+### 3. Start Using
 
 Try these example queries in Cursor:
 
@@ -129,20 +133,64 @@ Find available playbooks and identify content gaps.
 - `industry`: Industry focus
 - `showGaps`: Include gap analysis (default: true)
 
-## 🔧 Installation Options
+## 🔧 Installation & Configuration Methods
 
-### Option 1: NPX (Recommended)
-```bash
-npx @thedmaj/sales-intelligence-mcp
+### Method 1: Direct MCP Integration (Recommended)
+
+**For Cursor:**
+1. Open Cursor Settings → Extensions → MCP Servers
+2. Add this configuration:
+
+```json
+{
+  "sales_intelligence": {
+    "type": "stdio",
+    "command": "npx",
+    "args": ["-y", "@thedmaj/sales-intelligence-mcp"],
+    "env": {
+      "API_BASE_URL": "https://your-api-server.com",
+      "API_KEY": "your_api_key_here",
+      "MCP_LOG_LEVEL": "info"
+    }
+  }
+}
 ```
 
-### Option 2: Global Installation
+3. Restart Cursor
+4. Start using: *"Find account verification plays for enterprise banking"*
+
+**For Claude Desktop:**
+Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "sales_intelligence": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@thedmaj/sales-intelligence-mcp"],
+      "env": {
+        "API_BASE_URL": "https://your-api-server.com",
+        "API_KEY": "your_api_key_here"
+      }
+    }
+  }
+}
+```
+
+### Method 2: Standalone Server
+
 ```bash
-npm install -g @your-org/sales-intelligence-mcp
+# Run as HTTP server
+npx @thedmaj/sales-intelligence-mcp
+
+# Or install globally
+npm install -g @thedmaj/sales-intelligence-mcp
 sales-intelligence-mcp
 ```
 
-### Option 3: Local Development
+### Method 3: Development Setup
+
 ```bash
 git clone https://github.com/thedmaj/sales-intelligence-mcp.git
 cd sales-intelligence-mcp

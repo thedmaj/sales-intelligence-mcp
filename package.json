@@ -4,13 +4,14 @@
   "description": "MCP server for sales intelligence, competitive analysis, and playbook discovery",
   "main": "dist/index.js",
   "bin": {
-    "sales-intelligence-mcp": "dist/index.js"
+    "sales-intelligence-mcp": "dist/mcp-server.js"
   },
   "type": "module",
   "scripts": {
     "build": "tsc",
-    "dev": "tsc && node dist/index.js",
-    "start": "node dist/index.js",
+    "dev": "tsc && node dist/mcp-server.js",
+    "start": "node dist/mcp-server.js",
+    "server": "node dist/index.js",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
