@@ -45,8 +45,51 @@ export class ApiClient {
         throw new Error(`API request failed (${response.status})`);
       }
 
-      const result = await response.json();
-      return result as T;
+      // Check Content-Type header
+      const contentType = response.headers.get('content-type') || '';
+      
+      // Read response as text first (can only read body once)
+      const text = await response.text();
+      
+      // Check if response is HTML (common error case)
+      if (text.trim().startsWith('<!DOCTYPE') || text.trim().startsWith('<html')) {
+        const preview = text.substring(0, 200);
+        logger.error('Received HTML response instead of JSON', {
+          url,
+          contentType,
+          status: response.status,
+          preview
+        });
+        throw new Error(`API returned HTML instead of JSON. This usually means: 1) The endpoint doesn't exist, 2) Authentication failed, or 3) Server is redirecting to frontend. URL: ${url}`);
+      }
+      
+      // Check Content-Type if not HTML
+      if (!contentType.includes('application/json')) {
+        const preview = text.substring(0, 200);
+        logger.error('Received non-JSON response', {
+          url,
+          contentType,
+          status: response.status,
+          preview
+        });
+        throw new Error(`API returned ${contentType} instead of JSON. Response preview: ${preview}`);
+      }
+      
+      // Try to parse as JSON
+      try {
+        const result = JSON.parse(text);
+        return result as T;
+      } catch (parseError: any) {
+        const preview = text.substring(0, 200);
+        logger.error('Failed to parse JSON response', {
+          url,
+          contentType,
+          status: response.status,
+          error: parseError.message,
+          preview
+        });
+        throw new Error(`Failed to parse JSON response: ${parseError.message}. Response preview: ${preview}`);
+      }
 
     } catch (error: any) {
       clearTimeout(timeoutId);
