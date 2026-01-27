@@ -2,6 +2,8 @@ import { findSalesContentTool } from './findSalesContent.js';
 import { getCompetitiveIntelTool } from './getCompetitiveIntel.js';
 import { findProcessWorkflowsTool } from './findProcessWorkflows.js';
 import { discoverPlaybooksTool } from './discoverPlaybooks.js';
+import { discoverStandalonePlaysTool } from './discoverStandalonePlays.js';
+import { manageStandalonePlaysTool } from './manageStandalonePlays.js';
 
 export interface MCPTool {
   name: string;
@@ -18,6 +20,8 @@ export const tools: Record<string, MCPTool> = {
   [getCompetitiveIntelTool.name]: getCompetitiveIntelTool,
   [findProcessWorkflowsTool.name]: findProcessWorkflowsTool,
   [discoverPlaybooksTool.name]: discoverPlaybooksTool,
+  [discoverStandalonePlaysTool.name]: discoverStandalonePlaysTool,
+  [manageStandalonePlaysTool.name]: manageStandalonePlaysTool,
 };
 
 /**
